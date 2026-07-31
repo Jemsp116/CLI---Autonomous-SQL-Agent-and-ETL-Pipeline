@@ -15,7 +15,7 @@ This project generates sample invoice PDFs, extracts structured data from them, 
 ## Install
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/Jemsp116/CLI---Autonomous-SQL-Agent-and-ETL-Pipeline.git
 cd CLI - Autonomous-SQL-Agent-and-ETL-Pipeline
 python -m venv .venv
 # Windows
