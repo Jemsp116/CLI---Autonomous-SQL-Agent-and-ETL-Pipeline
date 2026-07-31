@@ -31,7 +31,8 @@ Required for the agent:
 
 - `OPENROUTER_API_KEY`
 
-Optional settings are read through `src/invoice_agent/config.py`.
+Optional settings are read through `src/invoice_agent/config.py`. Copy
+`.env.example` to `.env` if you want local overrides.
 
 ## Commands
 
@@ -90,7 +91,7 @@ invoice-agent status --csv data/csv/ --db data/db.sqlite
 - `src/invoice_agent/db/` - models, loader, and connection helpers
 - `src/invoice_agent/agent/` - read-only SQL agent and prompt templates
 - `tests/` - fixture and smoke tests
-- `docs/` - architecture, phases, rules, and workflow notes
+- `docs/` - architecture, rules, and workflow notes
 
 ## Development Notes
 
@@ -98,6 +99,8 @@ invoice-agent status --csv data/csv/ --db data/db.sqlite
 - Extraction should keep going when one PDF fails.
 - Loading is idempotent.
 - The agent connection is read-only.
+- Generated files under `data/`, local databases, virtual environments, and
+  `.env` files are ignored by git.
 
 ## Validation
 

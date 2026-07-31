@@ -1,12 +1,37 @@
+# Local secrets and environment
 .env
-.venv
-invoices
-docs
+*.env
+!.env.example
+.venv/
+venv/
+env/
 
+# Generated pipeline artifacts
+data/
+data_csv/
+database/
+invoices/
+*.sqlite
+*.sqlite3
+*.db
+*.zip
 
+# Python build, cache, and test output
 __pycache__/
 *.py[oc]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tmp/
 build/
 dist/
 wheels/
 *.egg-info
+
+# Editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
