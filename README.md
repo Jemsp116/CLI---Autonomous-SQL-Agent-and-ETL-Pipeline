@@ -8,7 +8,7 @@ This project generates sample invoice PDFs, extracts structured data from them, 
 
 - Generates deterministic sample invoice PDFs for demos and tests
 - Extracts invoice headers with `pdfplumber`
-- Extracts line items and summary tables with `camelot`
+- Extracts line items and summary tables with `camelot` (falls back to `pdfplumber` when Ghostscript is unavailable)
 - Loads CSV output into a relational database with SQLAlchemy
 - Answers natural-language questions through a read-only SQL agent
 
@@ -34,12 +34,52 @@ Required for the agent:
 Optional settings are read through `src/invoice_agent/config.py`. Copy
 `.env.example` to `.env` if you want local overrides.
 
+## Quick Start
+
+The fastest way to use the tool is to point it at a folder of PDFs:
+
+```bash
+invoice-agent /path/to/pdf_folder
+```
+
+This runs the full pipeline automatically:
+1. Validates the folder and finds PDFs
+2. Runs preflight checks (Ghostscript / OpenRouter API key)
+3. Extracts invoice headers
+4. Extracts tables (Camelot, with pdfplumber fallback)
+5. Loads into a SQLite database inside the input folder
+6. Prints a summary table
+7. Drops you into an interactive Q&A session
+
+Outputs are written inside the input folder by default:
+
+```
+pdf_folder/
+  invoice_agent_output/
+    invoice_headers.csv
+    invoice_line_items.csv
+    invoice_summaries.csv
+  invoice_data.db
+```
+
+Override output location with `--out` and `--db`:
+
+```bash
+invoice-agent /path/to/pdf_folder --out /tmp/results --db /tmp/invoices.db
+```
+
 ## Commands
 
 Show the CLI:
 
 ```bash
 invoice-agent --help
+```
+
+Process a folder (default):
+
+```bash
+invoice-agent /path/to/pdf_folder
 ```
 
 Generate sample invoices:
@@ -83,6 +123,11 @@ Check run status:
 ```bash
 invoice-agent status --csv data/csv/ --db data/db.sqlite
 ```
+
+## Ghostscript Note
+
+Table extraction uses `camelot`, which requires Ghostscript.
+If Ghostscript is not installed, the tool automatically falls back to `pdfplumber` table extraction so the pipeline can still run without extra system dependencies.
 
 ## Project Layout
 

@@ -9,6 +9,7 @@ docs/
 data/
 
 # Generated pipeline artifacts
+EXE/
 
 data_csv/
 database/

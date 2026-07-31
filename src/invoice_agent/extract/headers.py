@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import csv
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pdfplumber
@@ -117,7 +118,10 @@ def run(
     pdf_dir: str | Path | None = None,
     output_csv: str | Path | None = None,
     report_json: str | Path | None = None,
-) -> None:
+    *,
+    verbose: bool = True,
+    progress_callback: Callable[[Path, bool, str | None], None] | None = None,
+) -> dict:
     settings = get_settings()
     resolved_pdf_dir = Path(pdf_dir or settings.headers_input_dir)
     resolved_output_csv = Path(output_csv or settings.headers_output_csv)
@@ -125,12 +129,21 @@ def run(
 
     invoice_files = sorted([
         f for f in resolved_pdf_dir.iterdir()
-        if f.name.startswith("invoice_") and f.suffix == ".pdf"
+        if f.is_file() and f.suffix.lower() == ".pdf"
     ])
 
     if not invoice_files:
-        print(f"No invoice PDFs found in {resolved_pdf_dir}")
-        return
+        if verbose:
+            print(f"No invoice PDFs found in {resolved_pdf_dir}")
+        return {
+            "input_dir": str(resolved_pdf_dir),
+            "output_csv": str(resolved_output_csv),
+            "succeeded": [],
+            "failed": [],
+            "total_input_files": 0,
+            "total_succeeded": 0,
+            "total_failed": 0,
+        }
 
     fieldnames = [
         "invoice_no", "date_of_issue",
@@ -141,25 +154,32 @@ def run(
     records = []
     succeeded = []
     failed = []
-    print(f"Extracting headers from {len(invoice_files)} invoices ...\n")
+    if verbose:
+        print(f"Extracting headers from {len(invoice_files)} invoices ...\n")
 
     for file_path in invoice_files:
         try:
             data = extract_header(file_path)
             records.append(data)
             succeeded.append(file_path.name)
-            print(f"   {file_path.name}")
-            print(f"       Invoice No  : {data['invoice_no']}")
-            print(f"       Date        : {data['date_of_issue']}")
-            print(f"       Seller      : {data['seller_name']}")
-            print(f"       Client      : {data['client_name']}")
-            print(f"       Client Addr : {data['client_address']}")
-            print(f"       Client TaxId: {data['client_tax_id']}")
-            print()
+            if verbose:
+                print(f"   {file_path.name}")
+                print(f"       Invoice No  : {data['invoice_no']}")
+                print(f"       Date        : {data['date_of_issue']}")
+                print(f"       Seller      : {data['seller_name']}")
+                print(f"       Client      : {data['client_name']}")
+                print(f"       Client Addr : {data['client_address']}")
+                print(f"       Client TaxId: {data['client_tax_id']}")
+                print()
+            if progress_callback:
+                progress_callback(file_path, True, None)
         except Exception as exc:
             reason = str(exc)
             failed.append({"file": file_path.name, "reason": reason})
-            print(f"  ❌ {file_path.name} — ERROR: {reason}")
+            if verbose:
+                print(f"  ERROR: {file_path.name} - {reason}")
+            if progress_callback:
+                progress_callback(file_path, False, reason)
 
     resolved_output_csv.parent.mkdir(parents=True, exist_ok=True)
     with resolved_output_csv.open("w", newline="", encoding="utf-8") as file_handle:
@@ -179,9 +199,11 @@ def run(
     resolved_report_json.parent.mkdir(parents=True, exist_ok=True)
     resolved_report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    print(f"\n Headers saved → {resolved_output_csv}")
-    print(f"   Total records : {len(records)}")
-    print(f"   Report saved  → {resolved_report_json}")
+    if verbose:
+        print(f"\n Headers saved -> {resolved_output_csv}")
+        print(f"   Total records : {len(records)}")
+        print(f"   Report saved  -> {resolved_report_json}")
+    return report
 
 
 def main() -> None:

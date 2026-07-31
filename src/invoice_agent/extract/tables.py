@@ -1,13 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import csv
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import camelot
 import pandas as pd
+import pdfplumber
 
 from invoice_agent.config import get_settings
 
@@ -121,14 +123,15 @@ def parse_summary_table(df, invoice_no):
     return result
 
 
-def extract_tables(pdf_path):
+def extract_tables(pdf_path, *, verbose: bool = True):
     invoice_no = invoice_no_from_path(pdf_path)
     tables = camelot.read_pdf(str(pdf_path), pages="1", **LATTICE_KWARGS)
-    used_fallback = False
+    used_fallback = ""
     if len(tables) == 0:
-        print(f"  ↪ lattice found no tables for {Path(pdf_path).name}; retrying with stream mode")
+        if verbose:
+            print(f"  lattice found no tables for {Path(pdf_path).name}; retrying with stream mode")
         tables = camelot.read_pdf(str(pdf_path), pages="1", **STREAM_KWARGS)
-        used_fallback = True
+        used_fallback = "stream"
 
     line_items = []
     summary = None
@@ -142,6 +145,40 @@ def extract_tables(pdf_path):
             summary = parse_summary_table(df, invoice_no)
 
     return line_items, summary, used_fallback
+
+
+def extract_tables_pdfplumber(pdf_path, *, verbose: bool = True):
+    invoice_no = invoice_no_from_path(pdf_path)
+    line_items = []
+    summary = None
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            page = pdf.pages[0]
+            raw_tables = page.extract_tables()
+    except Exception as exc:
+        if verbose:
+            print(f"  pdfplumber failed for {Path(pdf_path).name}: {exc}")
+        raise
+
+    if not raw_tables:
+        if verbose:
+            print(f"  pdfplumber found no tables for {Path(pdf_path).name}")
+        return line_items, summary, "pdfplumber"
+
+    for raw in raw_tables:
+        if not raw or len(raw) < 2:
+            continue
+        header = " ".join(str(cell or "") for cell in raw[0]).lower()
+        df = pd.DataFrame(raw[1:], columns=raw[0])
+        df = df.fillna("")
+        kind = classify_table(df)
+        if kind == "items":
+            line_items = parse_items_table(df, invoice_no)
+        elif kind == "summary":
+            summary = parse_summary_table(df, invoice_no)
+
+    return line_items, summary, "pdfplumber"
 
 
 def validate_totals(line_items, summary):
@@ -181,7 +218,10 @@ def run(
     line_items_csv: str | Path | None = None,
     summaries_csv: str | Path | None = None,
     report_json: str | Path | None = None,
-) -> None:
+    *,
+    verbose: bool = True,
+    progress_callback: Callable[[Path, bool, str | None], None] | None = None,
+) -> dict:
     settings = get_settings()
     resolved_pdf_dir = Path(pdf_dir or settings.tables_input_dir)
     resolved_line_items_csv = Path(line_items_csv or settings.line_items_csv)
@@ -190,12 +230,24 @@ def run(
 
     invoice_files = sorted([
         f for f in resolved_pdf_dir.iterdir()
-        if f.name.startswith("invoice_") and f.suffix == ".pdf"
+        if f.is_file() and f.suffix.lower() == ".pdf"
     ])
 
     if not invoice_files:
-        print(f"No invoice PDFs found in {resolved_pdf_dir}")
-        return
+        if verbose:
+            print(f"No invoice PDFs found in {resolved_pdf_dir}")
+        return {
+            "input_dir": str(resolved_pdf_dir),
+            "line_items_csv": str(resolved_line_items_csv),
+            "summaries_csv": str(resolved_summaries_csv),
+            "succeeded": [],
+            "failed": [],
+            "validation_mismatches": [],
+            "total_input_files": 0,
+            "total_succeeded": 0,
+            "total_failed": 0,
+            "total_validation_mismatches": 0,
+        }
 
     all_line_items = []
     all_summaries = []
@@ -203,11 +255,17 @@ def run(
     failed = []
     validation_mismatches = []
 
-    print(f"Extracting tables from {len(invoice_files)} invoices ...\n")
+    if verbose:
+        print(f"Extracting tables from {len(invoice_files)} invoices ...\n")
 
     for file_path in invoice_files:
         try:
-            items, summary, used_fallback = extract_tables(file_path)
+            try:
+                items, summary, used_fallback = extract_tables(file_path, verbose=verbose)
+            except Exception as camelot_exc:
+                if verbose:
+                    print(f"  Camelot failed for {file_path.name}: {camelot_exc}; trying pdfplumber fallback")
+                items, summary, used_fallback = extract_tables_pdfplumber(file_path, verbose=verbose)
             all_line_items.extend(items)
             if summary:
                 all_summaries.append(summary)
@@ -227,25 +285,31 @@ def run(
                 "validation_status": validation["status"],
             })
 
-            print(f"  ✅ {file_path.name}")
-            print(f"       Line items extracted : {len(items)}")
-            if used_fallback:
-                print("       Camelot mode         : stream fallback")
-            if summary:
-                print(f"       Total Net Worth      : INR {summary['total_net_worth']:,.2f}")
-                print(f"       Total VAT            : INR {summary['total_vat']:,.2f}")
-                print(f"       Total Gross Worth    : INR {summary['total_gross_worth']:,.2f}")
-            if validation["status"] == "mismatch":
-                print(f"       Validation           : MISMATCH")
-                for issue in validation["issues"]:
-                    print(f"         - {issue}")
-            else:
-                print("       Validation           : OK")
-            print()
+            if verbose:
+                print(f"  OK: {file_path.name}")
+                print(f"       Line items extracted : {len(items)}")
+                if used_fallback:
+                    print(f"       Camelot mode         : {used_fallback}")
+                if summary:
+                    print(f"       Total Net Worth      : INR {summary['total_net_worth']:,.2f}")
+                    print(f"       Total VAT            : INR {summary['total_vat']:,.2f}")
+                    print(f"       Total Gross Worth    : INR {summary['total_gross_worth']:,.2f}")
+                if validation["status"] == "mismatch":
+                    print("       Validation           : MISMATCH")
+                    for issue in validation["issues"]:
+                        print(f"         - {issue}")
+                else:
+                    print("       Validation           : OK")
+                print()
+            if progress_callback:
+                progress_callback(file_path, True, None)
         except Exception as exc:
             reason = str(exc)
             failed.append({"file": file_path.name, "reason": reason})
-            print(f"  ❌ {file_path.name} — ERROR: {reason}")
+            if verbose:
+                print(f"  ERROR: {file_path.name} - {reason}")
+            if progress_callback:
+                progress_callback(file_path, False, reason)
 
     li_fields = [
         "invoice_no", "item_no", "description",
@@ -275,25 +339,25 @@ def run(
         "total_failed": len(failed),
         "total_validation_mismatches": len(validation_mismatches),
     }
-    resolved_report_json.parent.mkdir(parents=True, exist_ok=True)
-    resolved_report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    print("=" * 55)
-    print(f" Line items saved → {resolved_line_items_csv}")
-    print(f"   Total line item rows : {len(all_line_items)}")
-    print()
-    print(f"Summaries saved  → {resolved_summaries_csv}")
-    print(f"   Total summary rows   : {len(all_summaries)}")
+    if verbose:
+        print("=" * 55)
+        print(f" Line items saved -> {resolved_line_items_csv}")
+        print(f"   Total line item rows : {len(all_line_items)}")
+        print()
+        print(f"Summaries saved  -> {resolved_summaries_csv}")
+        print(f"   Total summary rows   : {len(all_summaries)}")
 
-    li_df = pd.read_csv(resolved_line_items_csv)
-    sum_df = pd.read_csv(resolved_summaries_csv)
-    print()
-    print("Line Items sample ")
-    print(li_df.head(3).to_string(index=False))
-    print()
-    print("Summaries sample ")
-    print(sum_df.head(3).to_string(index=False))
-    print(f"\n Report saved → {resolved_report_json}")
+        li_df = pd.read_csv(resolved_line_items_csv)
+        sum_df = pd.read_csv(resolved_summaries_csv)
+        print()
+        print("Line Items sample ")
+        print(li_df.head(3).to_string(index=False))
+        print()
+        print("Summaries sample ")
+        print(sum_df.head(3).to_string(index=False))
+        print(f"\n Report saved -> {resolved_report_json}")
+    return report
 
 
 def main() -> None:

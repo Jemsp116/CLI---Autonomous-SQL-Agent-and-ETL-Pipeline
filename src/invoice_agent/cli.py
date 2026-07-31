@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import typer
@@ -8,14 +9,43 @@ from rich.console import Console
 from invoice_agent.ask import run as ask_run
 from invoice_agent.extract.headers import run as extract_headers_run
 from invoice_agent.extract.tables import run as extract_tables_run
+from invoice_agent.folder_pipeline import run as folder_pipeline_run
 from invoice_agent.generate import run as generate_run
 from invoice_agent.load import run as load_run
 from invoice_agent.pipeline import run as pipeline_run
 from invoice_agent.status import run as status_run
 
-app = typer.Typer(add_completion=False, help="Invoice agent command line interface.")
+
+class InvoiceAgentCLI(typer.Typer):
+    def __call__(self, *args, **kwargs):
+        if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+            first_arg = Path(sys.argv[1])
+            if first_arg.exists() and first_arg.is_dir():
+                sys.argv.insert(1, "process")
+        try:
+            super().__call__(*args, **kwargs)
+        except SystemExit as exc:
+            if exc.code == 0 or (exc.code == 2 and len(sys.argv) <= 1):
+                console.print("[dim]Want to run steps individually? See: invoice-agent --help[/dim]")
+            raise
+
+
+app = InvoiceAgentCLI(add_completion=False, help="Invoice agent command line interface.", no_args_is_help=True)
 extract_app = typer.Typer(add_completion=False, help="Extraction commands.")
 console = Console()
+
+
+@app.command()
+def process(
+    pdf_folder: Path = typer.Argument(..., help="Folder containing invoice PDFs."),
+    db: Path | None = typer.Option(None, "--db", help="Output SQLite database path."),
+    out: Path | None = typer.Option(None, "--out", help="Output folder for CSV and report files."),
+) -> None:
+    try:
+        folder_pipeline_run(pdf_folder=pdf_folder, db_path=db, out_dir=out, console=console)
+    except (RuntimeError, ValueError) as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()

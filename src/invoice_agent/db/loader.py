@@ -49,7 +49,7 @@ def _to_float(value) -> float | None:
         return None
 
 
-def run(csv_dir: str | Path | None = None, db_path: str | Path | None = None) -> Path:
+def run(csv_dir: str | Path | None = None, db_path: str | Path | None = None, *, verbose: bool = True) -> Path:
     settings = get_settings()
     resolved_csv_dir = Path(csv_dir or settings.headers_output_csv.parent)
     resolved_db_path = Path(db_path or settings.demo_db_path)
@@ -160,9 +160,10 @@ def run(csv_dir: str | Path | None = None, db_path: str | Path | None = None) ->
             existing_line_item_keys.add(line_item_key)
             inserted_line_items += 1
 
-    print(f"Database created at: {resolved_db_path}")
-    print(f"Inserted {inserted_invoices} invoice rows.")
-    print(f"Inserted {inserted_line_items} invoice item rows.")
+    if verbose:
+        print(f"Database created at: {resolved_db_path}")
+        print(f"Inserted {inserted_invoices} invoice rows.")
+        print(f"Inserted {inserted_line_items} invoice item rows.")
     return resolved_db_path
 
 
