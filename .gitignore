@@ -5,9 +5,10 @@
 .venv/
 venv/
 env/
+docs/
+data/
 
 # Generated pipeline artifacts
-data
 
 data_csv/
 database/
