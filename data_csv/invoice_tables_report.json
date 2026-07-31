@@ -1,0 +1,38 @@
+{
+  "input_dir": "data\\invoices",
+  "line_items_csv": "data\\csv\\invoice_line_items.csv",
+  "summaries_csv": "data\\csv\\invoice_summaries.csv",
+  "succeeded": [
+    {
+      "file": "invoice_51109301.pdf",
+      "used_fallback": false,
+      "validation_status": "ok"
+    },
+    {
+      "file": "invoice_51109302.pdf",
+      "used_fallback": false,
+      "validation_status": "ok"
+    },
+    {
+      "file": "invoice_51109303.pdf",
+      "used_fallback": false,
+      "validation_status": "ok"
+    },
+    {
+      "file": "invoice_51109304.pdf",
+      "used_fallback": false,
+      "validation_status": "ok"
+    },
+    {
+      "file": "invoice_51109305.pdf",
+      "used_fallback": false,
+      "validation_status": "ok"
+    }
+  ],
+  "failed": [],
+  "validation_mismatches": [],
+  "total_input_files": 5,
+  "total_succeeded": 5,
+  "total_failed": 0,
+  "total_validation_mismatches": 0
+}

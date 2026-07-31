@@ -1,0 +1,12 @@
+.env
+.venv
+invoices
+docs
+
+
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
