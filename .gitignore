@@ -7,7 +7,8 @@ venv/
 env/
 
 # Generated pipeline artifacts
-data/
+data
+
 data_csv/
 database/
 invoices/
