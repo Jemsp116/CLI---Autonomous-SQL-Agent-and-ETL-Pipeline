@@ -16,8 +16,7 @@ runner = CliRunner()
 
 
 def test_folder_pipeline_smoke(tmp_path):
-    with patch("invoice_agent.folder_pipeline.find_ghostscript", return_value="gs"), \
-         patch("invoice_agent.folder_pipeline.ensure_openrouter_api_key", return_value=ApiKeyResult(key_found=True, persisted=True)), \
+    with patch("invoice_agent.folder_pipeline.ensure_openrouter_api_key", return_value=ApiKeyResult(key_found=True, persisted=True)), \
          patch("invoice_agent.folder_pipeline.run_interactive"):
         out_dir = tmp_path / "output"
         result = folder_pipeline_run(

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,23 +17,6 @@ class ApiKeyResult:
     key_found: bool
     persisted: bool
     warning: str | None = None
-
-
-def find_ghostscript() -> str | None:
-    for executable in ("gswin64c", "gswin32c", "gs"):
-        found = shutil.which(executable)
-        if found:
-            return found
-    return None
-
-
-def ghostscript_install_instructions() -> str:
-    system = platform.system().lower()
-    if system == "windows":
-        return "Windows: Install from https://ghostscript.com/releases/gsdnld.html and restart your terminal."
-    if system == "darwin":
-        return "macOS: brew install ghostscript"
-    return "Linux: sudo apt-get install ghostscript"
 
 
 def is_plausible_openrouter_key(value: str) -> bool:

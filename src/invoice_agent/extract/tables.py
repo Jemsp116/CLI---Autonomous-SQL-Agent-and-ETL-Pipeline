@@ -7,24 +7,10 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-import camelot
 import pandas as pd
 import pdfplumber
 
 from invoice_agent.config import get_settings
-
-LATTICE_KWARGS = dict(
-    flavor="lattice",
-    line_scale=40,
-    copy_text=["v"],
-)
-
-STREAM_KWARGS = dict(
-    flavor="stream",
-    edge_tol=50,
-    row_tol=10,
-    column_tol=10,
-)
 
 
 def clean(val):
@@ -71,14 +57,14 @@ def _normalize_header(value: str) -> str:
 
 
 def _column_map(df) -> dict[str, int]:
-    headers = [str(c) for c in df.iloc[0].tolist()]
+    headers = [str(c) for c in df.columns]
     return {_normalize_header(h): i for i, h in enumerate(headers)}
 
 
 def classify_table(df):
     if df.empty:
         return "unknown"
-    headers = [_normalize_header(str(c)) for c in df.iloc[0].tolist()]
+    headers = [_normalize_header(str(c)) for c in df.columns]
     header = " ".join(headers)
     if "description" in header:
         return "items"
@@ -99,7 +85,7 @@ def parse_items_table(df, invoice_no):
                 return clean(val)
         return ""
 
-    for _, row in df.iloc[1:].iterrows():
+    for _, row in df.iterrows():
         values = [clean(v) for v in row.tolist()]
         if not any(values):
             continue
@@ -146,7 +132,6 @@ def parse_summary_table(df, invoice_no):
         for name in names:
             if name in col:
                 idx = col[name]
-                # Use first data row (row 1) for summary extraction
                 row = df.iloc[1] if len(df) > 1 else df.iloc[0]
                 val = row.iloc[idx] if idx < len(row) else ""
                 return clean(val)
@@ -166,7 +151,7 @@ def parse_summary_table(df, invoice_no):
     if gross_worth:
         result["total_gross_worth"] = parse_amount(gross_worth)
 
-    for _, row in df.iloc[1:].iterrows():
+    for _, row in df.iterrows():
         flat = " ".join(str(v) for v in row.tolist()).lower()
         if "total" in flat:
             nw = get("net worth", "net amount")
@@ -187,32 +172,6 @@ def extract_tables(pdf_path, *, verbose: bool = True):
     invoice_no = invoice_no_from_path(pdf_path)
     if not invoice_no:
         invoice_no = invoice_no_from_pdf(pdf_path)
-    tables = camelot.read_pdf(str(pdf_path), pages="1", **LATTICE_KWARGS)
-    used_fallback = ""
-    if len(tables) == 0:
-        if verbose:
-            print(f"  lattice found no tables for {Path(pdf_path).name}; retrying with stream mode")
-        tables = camelot.read_pdf(str(pdf_path), pages="1", **STREAM_KWARGS)
-        used_fallback = "stream"
-
-    line_items = []
-    summary = None
-
-    for tbl in tables:
-        df = tbl.df
-        kind = classify_table(df)
-        if kind == "items":
-            line_items = parse_items_table(df, invoice_no)
-        elif kind == "summary":
-            summary = parse_summary_table(df, invoice_no)
-
-    return line_items, summary, used_fallback
-
-
-def extract_tables_pdfplumber(pdf_path, *, verbose: bool = True):
-    invoice_no = invoice_no_from_path(pdf_path)
-    if not invoice_no:
-        invoice_no = invoice_no_from_pdf(pdf_path)
     line_items = []
     summary = None
 
@@ -228,12 +187,11 @@ def extract_tables_pdfplumber(pdf_path, *, verbose: bool = True):
     if not raw_tables:
         if verbose:
             print(f"  pdfplumber found no tables for {Path(pdf_path).name}")
-        return line_items, summary, "pdfplumber"
+        return line_items, summary, True
 
     for raw in raw_tables:
         if not raw or len(raw) < 2:
             continue
-        header = " ".join(str(cell or "") for cell in raw[0]).lower()
         df = pd.DataFrame(raw[1:], columns=raw[0])
         df = df.fillna("")
         kind = classify_table(df)
@@ -242,7 +200,7 @@ def extract_tables_pdfplumber(pdf_path, *, verbose: bool = True):
         elif kind == "summary":
             summary = parse_summary_table(df, invoice_no)
 
-    return line_items, summary, "pdfplumber"
+    return line_items, summary, True
 
 
 def validate_totals(line_items, summary):
@@ -324,12 +282,7 @@ def run(
 
     for file_path in invoice_files:
         try:
-            try:
-                items, summary, used_fallback = extract_tables(file_path, verbose=verbose)
-            except Exception as camelot_exc:
-                if verbose:
-                    print(f"  Camelot failed for {file_path.name}: {camelot_exc}; trying pdfplumber fallback")
-                items, summary, used_fallback = extract_tables_pdfplumber(file_path, verbose=verbose)
+            items, summary, used_fallback = extract_tables(file_path, verbose=verbose)
             all_line_items.extend(items)
             if summary:
                 all_summaries.append(summary)
@@ -352,8 +305,6 @@ def run(
             if verbose:
                 print(f"  OK: {file_path.name}")
                 print(f"       Line items extracted : {len(items)}")
-                if used_fallback:
-                    print(f"       Camelot mode         : {used_fallback}")
                 if summary:
                     print(f"       Total Net Worth      : INR {summary['total_net_worth']:,.2f}")
                     print(f"       Total VAT            : INR {summary['total_vat']:,.2f}")

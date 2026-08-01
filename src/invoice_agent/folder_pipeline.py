@@ -13,11 +13,7 @@ from invoice_agent.ask import run_interactive
 from invoice_agent.db.loader import run as load_run
 from invoice_agent.extract.headers import run as headers_run
 from invoice_agent.extract.tables import run as tables_run
-from invoice_agent.preflight import (
-    ensure_openrouter_api_key,
-    find_ghostscript,
-    ghostscript_install_instructions,
-)
+from invoice_agent.preflight import ensure_openrouter_api_key
 
 
 @dataclass(frozen=True)
@@ -143,13 +139,6 @@ def _run_preflight(console: Console, pdf_count: int) -> None:
     console.print("[bold]Preflight checks[/bold]")
     console.print("[green]OK[/green] Input folder found")
     console.print(f"[green]OK[/green] PDF files found: {pdf_count}")
-
-    ghostscript = find_ghostscript()
-    if not ghostscript:
-        console.print("[yellow]WARN[/yellow] Ghostscript not found — pdfplumber fallback will be used for tables")
-        console.print(f"[dim]{ghostscript_install_instructions()}[/dim]")
-    else:
-        console.print("[green]OK[/green] Ghostscript found")
 
     api_result = ensure_openrouter_api_key(lambda prompt: console.input(prompt, password=True))
     console.print("[green]OK[/green] OpenRouter API key found")
