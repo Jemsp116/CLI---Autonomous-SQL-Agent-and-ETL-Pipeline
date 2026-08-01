@@ -41,14 +41,45 @@ def parse_amount(val):
 
 
 def invoice_no_from_path(fpath):
-    m = re.search(r"invoice_(\d+)", os.path.basename(fpath))
-    return m.group(1) if m else ""
+    base = os.path.basename(fpath)
+    m = re.search(r"invoice[-_](\d+)", base)
+    if m:
+        value = m.group(1)
+        if value != "0":
+            return value
+    return ""
+
+
+def invoice_no_from_pdf(pdf_path) -> str:
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            page = pdf.pages[0]
+            text = page.extract_text() or ""
+    except Exception:
+        return ""
+    m = re.search(r"INVOICE\s*[#:]\s*(\S+)", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    m = re.search(r"Invoice no:\s*(\d+)", text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _normalize_header(value: str) -> str:
+    return clean(value).lower()
+
+
+def _column_map(df) -> dict[str, int]:
+    headers = [str(c) for c in df.iloc[0].tolist()]
+    return {_normalize_header(h): i for i, h in enumerate(headers)}
 
 
 def classify_table(df):
     if df.empty:
         return "unknown"
-    header = " ".join(str(c) for c in df.iloc[0].tolist()).lower()
+    headers = [_normalize_header(str(c)) for c in df.iloc[0].tolist()]
+    header = " ".join(headers)
     if "description" in header:
         return "items"
     if "net worth" in header and "description" not in header:
@@ -58,21 +89,31 @@ def classify_table(df):
 
 def parse_items_table(df, invoice_no):
     records = []
+    col = _column_map(df)
+
+    def get(row, *names: str) -> str:
+        for name in names:
+            if name in col:
+                idx = col[name]
+                val = row.iloc[idx] if idx < len(row) else ""
+                return clean(val)
+        return ""
+
     for _, row in df.iloc[1:].iterrows():
         values = [clean(v) for v in row.tolist()]
         if not any(values):
             continue
 
-        no_ = values[0] if len(values) > 0 else ""
-        desc = values[1] if len(values) > 1 else ""
-        qty = values[2] if len(values) > 2 else ""
-        um = values[3] if len(values) > 3 else ""
-        net_price = values[4] if len(values) > 4 else ""
-        net_worth = values[5] if len(values) > 5 else ""
-        vat_pct = values[6] if len(values) > 6 else ""
-        gross_worth = values[7] if len(values) > 7 else ""
+        no_ = get(row, "no.", "#", "item no", "item")
+        desc = get(row, "description", "desc", "item description")
+        qty = get(row, "qty", "quantity", "qty.")
+        unit = get(row, "um", "unit", "uom")
+        net_price = get(row, "net price", "unit price", "price")
+        net_worth = get(row, "net worth", "net amount", "total")
+        vat_pct = get(row, "vat %", "vat", "gst %")
+        gross_worth = get(row, "gross worth", "gross amount", "gross total")
 
-        if "description" in desc.lower():
+        if "description" in desc.lower() and not no_:
             continue
 
         records.append({
@@ -80,7 +121,7 @@ def parse_items_table(df, invoice_no):
             "item_no": no_.rstrip("."),
             "description": desc,
             "qty": parse_amount(qty),
-            "unit": um,
+            "unit": unit,
             "net_price": parse_amount(net_price),
             "net_worth": parse_amount(net_worth),
             "vat_pct": vat_pct,
@@ -99,32 +140,53 @@ def parse_summary_table(df, invoice_no):
         "total_gross_worth": None,
     }
 
-    rows = [[clean(v) for v in row.tolist()] for _, row in df.iterrows()]
+    col = _column_map(df)
 
-    for row in rows:
-        flat = " ".join(row).lower()
-        if "10%" in flat and "total" not in flat and "net worth" not in flat:
-            result["vat_pct"] = "10%"
-            result["total_net_worth"] = parse_amount(row[2]) if len(row) > 2 else None
-            result["total_vat"] = parse_amount(row[3]) if len(row) > 3 else None
-            result["total_gross_worth"] = parse_amount(row[4]) if len(row) > 4 else None
+    def get(*names: str) -> str:
+        for name in names:
+            if name in col:
+                idx = col[name]
+                # Use first data row (row 1) for summary extraction
+                row = df.iloc[1] if len(df) > 1 else df.iloc[0]
+                val = row.iloc[idx] if idx < len(row) else ""
+                return clean(val)
+        return ""
 
+    vat_pct = get("vat %", "vat", "gst %")
+    net_worth = get("net worth", "net amount")
+    vat = get("vat", "tax")
+    gross_worth = get("gross worth", "gross amount", "gross total")
+
+    if vat_pct:
+        result["vat_pct"] = vat_pct
+    if net_worth:
+        result["total_net_worth"] = parse_amount(net_worth)
+    if vat:
+        result["total_vat"] = parse_amount(vat)
+    if gross_worth:
+        result["total_gross_worth"] = parse_amount(gross_worth)
+
+    for _, row in df.iloc[1:].iterrows():
+        flat = " ".join(str(v) for v in row.tolist()).lower()
         if "total" in flat:
-            nw = parse_amount(row[2]) if len(row) > 2 else None
-            vat = parse_amount(row[3]) if len(row) > 3 else None
-            gw = parse_amount(row[4]) if len(row) > 4 else None
+            nw = get("net worth", "net amount")
+            vat_val = get("vat", "tax")
+            gw = get("gross worth", "gross amount", "gross total")
             if nw:
-                result["total_net_worth"] = nw
-            if vat:
-                result["total_vat"] = vat
+                result["total_net_worth"] = parse_amount(nw)
+            if vat_val:
+                result["total_vat"] = parse_amount(vat_val)
             if gw:
-                result["total_gross_worth"] = gw
+                result["total_gross_worth"] = parse_amount(gw)
+            break
 
     return result
 
 
 def extract_tables(pdf_path, *, verbose: bool = True):
     invoice_no = invoice_no_from_path(pdf_path)
+    if not invoice_no:
+        invoice_no = invoice_no_from_pdf(pdf_path)
     tables = camelot.read_pdf(str(pdf_path), pages="1", **LATTICE_KWARGS)
     used_fallback = ""
     if len(tables) == 0:
@@ -149,6 +211,8 @@ def extract_tables(pdf_path, *, verbose: bool = True):
 
 def extract_tables_pdfplumber(pdf_path, *, verbose: bool = True):
     invoice_no = invoice_no_from_path(pdf_path)
+    if not invoice_no:
+        invoice_no = invoice_no_from_pdf(pdf_path)
     line_items = []
     summary = None
 
