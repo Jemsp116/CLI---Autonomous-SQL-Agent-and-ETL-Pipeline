@@ -7,6 +7,7 @@ venv/
 env/
 docs/
 data/
+.python-version
 
 # Generated pipeline artifacts
 EXE/
@@ -17,6 +18,11 @@ invoices/
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+*.db-journal
 *.zip
 
 # Python build, cache, and test output
@@ -28,6 +34,17 @@ __pycache__/
 .coverage
 htmlcov/
 tmp/
+temp/
+.temp/
+.cache/
+.history/
+.ipynb_checkpoints/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+*.swp
 build/
 dist/
 wheels/

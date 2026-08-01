@@ -26,7 +26,7 @@ invoice-agent extract tables --in data/invoices/ --line-items-out data/csv/invoi
 invoice-agent load --csv data/csv/ --db data/db.sqlite
 
 # Ask a question
-invoice-agent ask "which client has the highest total spend?"
+invoice-agent ask "which client has the highest total spend?"  # opens the full-screen chat
 
 # Run everything end-to-end
 invoice-agent pipeline --count 10
@@ -40,7 +40,7 @@ invoice-agent status
 1. Confirm the change fits the architecture and project rules.
 2. Create a branch: `git checkout -b short-description`
 3. Make the change in the relevant module (`generate.py`, `extract/*.py`,
-   `db/*.py`, `agent/*.py`) — not in `cli.py` (see `RULES.md`).
+   `db/*.py`, `agent/*.py`, `ui/*.py`) — not in `cli.py` (see `RULES.md`).
 4. Add/update a test if the change touches extraction, DB loading, or
    agent behavior.
 5. Run the test suite:

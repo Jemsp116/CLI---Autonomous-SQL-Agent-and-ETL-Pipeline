@@ -6,7 +6,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from invoice_agent.ask import run as ask_run
+from invoice_agent.ask import run_interactive as ask_run
 from invoice_agent.extract.headers import run as extract_headers_run
 from invoice_agent.extract.tables import run as extract_tables_run
 from invoice_agent.folder_pipeline import run as folder_pipeline_run
@@ -95,7 +95,7 @@ def ask(
     db: Path = typer.Option(Path("data/db.sqlite"), "--db", help="SQLite database path."),
 ) -> None:
     console.print(f"[bold]ask[/bold] db={db} question={question}")
-    ask_run(question=question, db_path=db)
+    ask_run(initial_question=question, db_path=db)
 
 
 @app.command()

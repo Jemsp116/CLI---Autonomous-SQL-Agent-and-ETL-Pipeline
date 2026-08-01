@@ -48,7 +48,13 @@ API/web layer without rewriting logic.
 - The agent connects to the database using a **read-only role**. It must
   never hold write/delete permissions.
 
-### 2.5 CLI (`invoice_agent/cli.py`)
+### 2.5 Terminal UI (`invoice_agent/ui/`)
+- Rich-based full-screen chat interface for `ask`.
+- Keeps rendering separate from agent and database logic.
+- Splits the interface into reusable header, conversation, input box, and
+  layout modules so the UI can evolve independently.
+
+### 2.6 CLI (`invoice_agent/cli.py`)
 - Thin layer. Commands parse arguments and call into the modules above.
   No business logic lives in the CLI file itself.
 
@@ -57,8 +63,9 @@ API/web layer without rewriting logic.
 1. PDFs land in `data/invoices/` (generated or uploaded).
 2. `extract headers` and `extract tables` produce CSVs in `data/csv/`.
 3. `load` reads those CSVs and upserts rows into the database.
-4. `ask` sends a question to the agent, which queries the database and
-   returns a natural-language answer.
+4. `ask` opens a Rich full-screen chat. The backend queries the database,
+  streams the final answer, and keeps the conversation visible above a
+  fixed input box.
 5. `status` reads the filesystem + database to summarize pipeline state.
 
 ## 4. Technology Choices

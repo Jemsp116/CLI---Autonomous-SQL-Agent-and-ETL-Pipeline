@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from langchain_community.utilities.sql_database import SQLDatabase
@@ -40,12 +41,13 @@ def _require_openrouter_key() -> str:
     return api_key
 
 
-def _create_llm():
+def _create_llm(*, streaming: bool = False):
     settings = get_settings()
     return ChatOpenAI(
         model=settings.agent_model,
         openai_api_key=_require_openrouter_key(),
         openai_api_base=settings.openrouter_api_base,
+        streaming=streaming,
         temperature=0,
     )
 
@@ -73,8 +75,14 @@ def _format_rows(rows: list[dict[str, object]]) -> str:
     return json.dumps(rows, indent=2, default=str)
 
 
-def _summarize_answer(question: str, sql_query: str, rows: list[dict[str, object]]) -> str:
-    llm = _create_llm()
+def _summarize_answer(
+    question: str,
+    sql_query: str,
+    rows: list[dict[str, object]],
+    *,
+    on_token: Callable[[str], None] | None = None,
+) -> str:
+    llm = _create_llm(streaming=True)
     summary_prompt = [
         SystemMessage(
             content=(
@@ -89,10 +97,29 @@ def _summarize_answer(question: str, sql_query: str, rows: list[dict[str, object
             )
         ),
     ]
+    chunks: list[str] = []
+    for chunk in llm.stream(summary_prompt):
+        token = getattr(chunk, "content", "") or ""
+        if token:
+            chunks.append(token)
+            if on_token is not None:
+                on_token(token)
+
+    answer = "".join(chunks).strip()
+    if answer:
+        return answer
+
     return llm.invoke(summary_prompt).content.strip()
 
 
-def ask(question: str, db_path: str | Path | None = None, max_attempts: int = 3) -> str:
+def ask(
+    question: str,
+    db_path: str | Path | None = None,
+    max_attempts: int = 3,
+    *,
+    on_thinking: Callable[[], None] | None = None,
+    on_token: Callable[[str], None] | None = None,
+) -> str:
     settings = get_settings()
     resolved_db_path = Path(db_path or settings.demo_db_path)
 
@@ -108,6 +135,9 @@ def ask(question: str, db_path: str | Path | None = None, max_attempts: int = 3)
     last_error: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
+        if on_thinking is not None:
+            on_thinking()
+
         prompt = (
             f"Question: {question}\n"
             f"{error_context}"
@@ -127,7 +157,7 @@ def ask(question: str, db_path: str | Path | None = None, max_attempts: int = 3)
             with engine.connect() as connection:
                 result = connection.execute(text(plan.sql_query))
                 rows = [dict(row) for row in result.mappings().all()]
-            answer = _summarize_answer(question, plan.sql_query, rows)
+            answer = _summarize_answer(question, plan.sql_query, rows, on_token=on_token)
             logger.info("Attempt %s final answer: %s", attempt, answer)
             console.print(answer)
             return answer
