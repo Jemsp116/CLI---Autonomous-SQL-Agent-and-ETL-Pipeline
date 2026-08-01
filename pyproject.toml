@@ -8,7 +8,6 @@ version = "0.1.0"
 description = "CLI-first invoice extraction and analysis toolkit"
 requires-python = ">=3.10"
 dependencies = [
-  "camelot-py[cv]>=0.11",
   "langchain>=0.3",
   "langchain-community>=0.3",
   "langchain-openai>=0.3",

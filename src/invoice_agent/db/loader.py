@@ -130,7 +130,7 @@ def run(csv_dir: str | Path | None = None, db_path: str | Path | None = None, *,
                 existing_invoices[invoice_number] = invoice
                 inserted_invoices += 1
 
-        for record in items_df.to_dict(orient="records"):
+        for idx, record in enumerate(items_df.to_dict(orient="records"), start=1):
             invoice_number = _to_text(record["invoice_no"])
             if invoice_number is None:
                 continue
@@ -140,6 +140,8 @@ def run(csv_dir: str | Path | None = None, db_path: str | Path | None = None, *,
                 continue
 
             item_no = _to_int(record["item_no"])
+            if item_no is None:
+                item_no = idx
             line_item_key = (invoice.id, item_no)
             if line_item_key in existing_line_item_keys:
                 continue

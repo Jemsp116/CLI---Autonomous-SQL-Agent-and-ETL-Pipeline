@@ -59,9 +59,6 @@ def extract_header(pdf_path):
         words = page.extract_words()
 
     rows = group_words_by_row(words, y_tolerance=4)
-    in_seller_client_block = False
-    seller_lines = []
-    client_lines = []
 
     for row in rows:
         text = row_text(row)
@@ -77,6 +74,24 @@ def extract_header(pdf_path):
             if m:
                 result["date_of_issue"] = m.group(1)
             continue
+
+        if "Seller:" in text and "Client:" in text:
+            _parse_seller_client_block(rows, row, result)
+            return result
+
+    if not result["invoice_no"]:
+        _parse_alternative_header(rows, result)
+
+    return result
+
+
+def _parse_seller_client_block(rows, start_row, result):
+    in_seller_client_block = False
+    seller_lines = []
+    client_lines = []
+
+    for row in rows:
+        text = row_text(row)
 
         if "Seller:" in text and "Client:" in text:
             in_seller_client_block = True
@@ -111,7 +126,52 @@ def extract_header(pdf_path):
         result["client_name"] = client_lines[0]
         result["client_address"] = ", ".join(client_lines[1:])
 
-    return result
+
+def _parse_alternative_header(rows, result):
+    to_blocks = []
+    current_block = []
+    in_block = False
+
+    for row in rows:
+        text = row_text(row)
+
+        if re.match(r"^TO:\s*$", text):
+            in_block = True
+            current_block = []
+            continue
+
+        if re.match(r"^(COMMENTS|OR|SPECIAL|INSTRUCTIONS|SALESPERSON|P\.O\.|TERMS)", text):
+            in_block = False
+            if current_block:
+                to_blocks.append(current_block)
+                current_block = []
+            continue
+
+        if in_block:
+            current_block.append(row_text(row))
+
+    if current_block:
+        to_blocks.append(current_block)
+
+    for row in rows:
+        text = row_text(row)
+
+        m = re.search(r"INVOICE\s*#\s*(\S+)", text, re.IGNORECASE)
+        if m:
+            result["invoice_no"] = m.group(1)
+            continue
+
+        m = re.search(r"DATE:\s*([\d./-]+)", text, re.IGNORECASE)
+        if m:
+            result["date_of_issue"] = m.group(1)
+            continue
+
+    if len(to_blocks) >= 1:
+        result["seller_name"] = to_blocks[0][0] if to_blocks[0] else ""
+        result["seller_address"] = ", ".join(to_blocks[0][1:]) if len(to_blocks[0]) > 1 else ""
+    if len(to_blocks) >= 2:
+        result["client_name"] = to_blocks[1][0] if to_blocks[1] else ""
+        result["client_address"] = ", ".join(to_blocks[1][1:]) if len(to_blocks[1]) > 1 else ""
 
 
 def run(
@@ -160,6 +220,8 @@ def run(
     for file_path in invoice_files:
         try:
             data = extract_header(file_path)
+            if not data.get("invoice_no"):
+                raise ValueError("Invoice number not found in PDF")
             records.append(data)
             succeeded.append(file_path.name)
             if verbose:
