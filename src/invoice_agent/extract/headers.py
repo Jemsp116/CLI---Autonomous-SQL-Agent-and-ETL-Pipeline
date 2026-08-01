@@ -76,7 +76,7 @@ def extract_header(pdf_path):
             continue
 
         if "Seller:" in text and "Client:" in text:
-            _parse_seller_client_block(rows, row, result)
+            _parse_seller_client_block(rows, result)
             return result
 
     if not result["invoice_no"]:
@@ -85,7 +85,7 @@ def extract_header(pdf_path):
     return result
 
 
-def _parse_seller_client_block(rows, start_row, result):
+def _parse_seller_client_block(rows, result):
     in_seller_client_block = False
     seller_lines = []
     client_lines = []

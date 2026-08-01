@@ -6,7 +6,7 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TaskID, TextColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from invoice_agent.ask import run_interactive
@@ -140,7 +140,7 @@ def _run_preflight(console: Console, pdf_count: int) -> None:
     console.print("[green]OK[/green] Input folder found")
     console.print(f"[green]OK[/green] PDF files found: {pdf_count}")
 
-    api_result = ensure_openrouter_api_key(lambda prompt: console.input(prompt, password=True))
+    api_result = ensure_openrouter_api_key(lambda prompt: console.input(prompt))
     console.print("[green]OK[/green] OpenRouter API key found")
     if api_result.warning:
         console.print(f"[yellow]WARN[/yellow] {api_result.warning}")
