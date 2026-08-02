@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pandas as pd
 
@@ -29,6 +30,9 @@ def test_headers_run_on_fixtures(tmp_path):
     assert result.loc[2, "invoice_no"] == 51109303
     assert result.loc[2, "client_address"] == "78 Linking Road, Mumbai, Maharashtra - 400050"
 
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["succeeded"][0]["method"] == "rules"
+
 
 def test_tables_run_on_fixtures(tmp_path):
     line_items_csv = tmp_path / "line_items.csv"
@@ -51,3 +55,6 @@ def test_tables_run_on_fixtures(tmp_path):
     assert line_items.loc[0, "description"] == "Garmin Fenix 7 Solar Multisport GPS"
     assert line_items.loc[0, "gross_worth"] == 733788.0
     assert summaries.loc[0, "total_gross_worth"] == 1844673.6
+
+    report = json.loads(report_json.read_text(encoding="utf-8"))
+    assert report["succeeded"][0]["method"] == "rules"

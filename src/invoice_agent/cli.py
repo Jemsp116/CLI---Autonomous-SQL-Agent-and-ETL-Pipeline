@@ -62,9 +62,10 @@ def generate(
 def extract_headers(
     in_dir: Path = typer.Option(Path("data/invoices"), "--in", help="Input directory containing invoice PDFs."),
     out: Path = typer.Option(Path("data/csv/invoice_headers.csv"), help="Output CSV path."),
+    enable_llm_fallback: bool = typer.Option(True, "--llm-fallback/--no-llm-fallback", help="Enable LLM fallback for headers extraction."),
 ) -> None:
     console.print(f"[bold]extract headers[/bold] in={in_dir} out={out}")
-    extract_headers_run(pdf_dir=in_dir, output_csv=out)
+    extract_headers_run(pdf_dir=in_dir, output_csv=out, enable_llm_fallback=enable_llm_fallback)
 
 
 @extract_app.command("tables")
@@ -72,9 +73,10 @@ def extract_tables(
     in_dir: Path = typer.Option(Path("data/invoices"), "--in", help="Input directory containing invoice PDFs."),
     line_items_out: Path = typer.Option(Path("data/csv/invoice_line_items.csv"), help="Line items CSV path."),
     summaries_out: Path = typer.Option(Path("data/csv/invoice_summaries.csv"), help="Summaries CSV path."),
+    enable_llm_fallback: bool = typer.Option(True, "--llm-fallback/--no-llm-fallback", help="Enable LLM fallback for tables extraction."),
 ) -> None:
     console.print(f"[bold]extract tables[/bold] in={in_dir} line_items={line_items_out} summaries={summaries_out}")
-    extract_tables_run(pdf_dir=in_dir, line_items_csv=line_items_out, summaries_csv=summaries_out)
+    extract_tables_run(pdf_dir=in_dir, line_items_csv=line_items_out, summaries_csv=summaries_out, enable_llm_fallback=enable_llm_fallback)
 
 
 app.add_typer(extract_app, name="extract")
@@ -106,9 +108,10 @@ def pipeline(
     csv: Path = typer.Option(Path("data/csv"), "--csv", help="CSV directory."),
     db: Path = typer.Option(Path("data/db.sqlite"), "--db", help="SQLite database path."),
     question: str | None = typer.Option(None, help="Optional question to ask after loading."),
+    enable_llm_fallback: bool = typer.Option(True, "--llm-fallback/--no-llm-fallback", help="Enable LLM fallback for extraction."),
 ) -> None:
     console.print(f"[bold]pipeline[/bold] count={count} out={out} csv={csv} db={db}")
-    pipeline_run(count=count, out_dir=out, zip_path=zip_path, csv_dir=csv, db_path=db, question=question)
+    pipeline_run(count=count, out_dir=out, zip_path=zip_path, csv_dir=csv, db_path=db, question=question, enable_llm_fallback=enable_llm_fallback)
 
 
 @app.command()

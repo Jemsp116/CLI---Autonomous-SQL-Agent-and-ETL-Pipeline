@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     openrouter_api_base: str = "https://openrouter.ai/api/v1"
     agent_model: str = "openai/gpt-oss-120b"
+    enable_llm_fallback: bool = False
+    extraction_model: str = "openai/gpt-oss-120b"
+    llm_fallback_max_retries: int = 1
 
 
 @lru_cache(maxsize=1)

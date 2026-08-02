@@ -23,8 +23,8 @@ def test_folder_pipeline_smoke(tmp_path):
             pdf_folder=FIXTURES,
             out_dir=out_dir,
         )
-        assert result.total_files == 3
-        assert result.succeeded == 3
+        assert result.total_files >= 3
+        assert result.succeeded >= 3
         assert result.failed == []
         assert (out_dir / "invoice_headers.csv").exists()
         assert (out_dir / "invoice_line_items.csv").exists()

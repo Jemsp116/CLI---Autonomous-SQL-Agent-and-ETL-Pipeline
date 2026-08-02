@@ -28,6 +28,19 @@ def is_plausible_openrouter_key(value: str) -> bool:
     return key.startswith(("sk-or-", "sk-"))
 
 
+def enable_llm_fallback_if_available(enable_llm_fallback: bool) -> bool:
+    if not enable_llm_fallback:
+        return False
+
+    settings = get_settings()
+    api_key = settings.openrouter_api_key or os.environ.get("OPENROUTER_API_KEY")
+    if api_key:
+        return True
+
+    print("WARN: OPENROUTER_API_KEY is not set; LLM fallback disabled and extraction will use rules only.")
+    return False
+
+
 def ensure_openrouter_api_key(prompt_func: Callable[[str], str]) -> ApiKeyResult:
     settings = get_settings()
     existing_key = settings.openrouter_api_key

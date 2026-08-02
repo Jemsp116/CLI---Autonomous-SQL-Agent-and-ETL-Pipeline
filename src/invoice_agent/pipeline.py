@@ -22,6 +22,7 @@ def run(
     csv_dir: str | Path | None = None,
     db_path: str | Path | None = None,
     question: str | None = None,
+    enable_llm_fallback: bool = True,
 ) -> None:
     settings = get_settings()
     resolved_out_dir = Path(out_dir or settings.invoice_output_dir)
@@ -47,6 +48,7 @@ def run(
             pdf_dir=resolved_out_dir,
             output_csv=resolved_csv_dir / "invoice_headers.csv",
             report_json=resolved_csv_dir / "invoice_headers_report.json",
+            enable_llm_fallback=enable_llm_fallback,
         )
         progress.update(task, completed=1)
 
@@ -56,6 +58,7 @@ def run(
             line_items_csv=resolved_csv_dir / "invoice_line_items.csv",
             summaries_csv=resolved_csv_dir / "invoice_summaries.csv",
             report_json=resolved_csv_dir / "invoice_tables_report.json",
+            enable_llm_fallback=enable_llm_fallback,
         )
         progress.update(task, completed=1)
 

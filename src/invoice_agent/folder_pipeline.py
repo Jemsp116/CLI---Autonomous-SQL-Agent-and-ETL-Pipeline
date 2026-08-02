@@ -31,6 +31,7 @@ def run(
     db_path: str | Path | None = None,
     out_dir: str | Path | None = None,
     console: Console | None = None,
+    enable_llm_fallback: bool = True,
 ) -> FolderRunResult:
     resolved_console = console or Console()
     resolved_pdf_folder = Path(pdf_folder).expanduser().resolve()
@@ -78,6 +79,7 @@ def run(
             report_json=resolved_out_dir / "invoice_headers_report.json",
             verbose=False,
             progress_callback=on_header,
+            enable_llm_fallback=enable_llm_fallback,
         )
 
         tables_task = progress.add_task(_progress_text("Extracting tables", 0), total=len(pdf_files))
@@ -98,6 +100,7 @@ def run(
             report_json=resolved_out_dir / "invoice_tables_report.json",
             verbose=False,
             progress_callback=on_table,
+            enable_llm_fallback=enable_llm_fallback,
         )
 
         load_task = progress.add_task("Loading database", total=1)

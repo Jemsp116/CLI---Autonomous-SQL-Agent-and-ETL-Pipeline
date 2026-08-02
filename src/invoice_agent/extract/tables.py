@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 import csv
 import os
 import re
@@ -10,6 +11,7 @@ import pandas as pd
 import pdfplumber
 
 from invoice_agent.config import get_settings
+from invoice_agent.extract.llm_fallback import extract_full_invoice_llm
 
 
 def clean(val):
@@ -49,6 +51,12 @@ def invoice_no_from_pdf(pdf_path) -> str:
     if m:
         return m.group(1)
     return ""
+
+
+def _get_page_text(pdf_path: str | Path) -> str:
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        return page.extract_text() or ""
 
 
 def _normalize_header(value: str) -> str:
@@ -178,28 +186,81 @@ def extract_tables(pdf_path, *, verbose: bool = True):
         with pdfplumber.open(pdf_path) as pdf:
             page = pdf.pages[0]
             raw_tables = page.extract_tables()
+            text = page.extract_text() or ""
     except Exception as exc:
         if verbose:
             print(f"  pdfplumber failed for {Path(pdf_path).name}: {exc}")
         raise
 
-    if not raw_tables:
+    if raw_tables:
+        for raw in raw_tables:
+            if not raw or len(raw) < 2:
+                continue
+            df = pd.DataFrame(raw[1:], columns=raw[0])
+            df = df.fillna("")
+            kind = classify_table(df)
+            if kind == "items":
+                line_items = parse_items_table(df, invoice_no)
+            elif kind == "summary":
+                summary = parse_summary_table(df, invoice_no)
+
+    if not line_items and text:
+        line_items = _parse_superstore_items(text, invoice_no)
+
+    if not line_items:
         if verbose:
             print(f"  pdfplumber found no tables for {Path(pdf_path).name}")
         return line_items, summary, True
 
-    for raw in raw_tables:
-        if not raw or len(raw) < 2:
-            continue
-        df = pd.DataFrame(raw[1:], columns=raw[0])
-        df = df.fillna("")
-        kind = classify_table(df)
-        if kind == "items":
-            line_items = parse_items_table(df, invoice_no)
-        elif kind == "summary":
-            summary = parse_summary_table(df, invoice_no)
-
     return line_items, summary, True
+
+
+def _parse_superstore_items(text: str, invoice_no: str) -> list[dict]:
+    items = []
+    lines = text.splitlines()
+
+    item_section = False
+    current_description_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Item ") and "Quantity" in stripped and "Rate" in stripped:
+            item_section = True
+            continue
+        if item_section and (stripped.startswith("Subtotal:") or stripped.startswith("Discount") or stripped.startswith("Shipping:") or stripped.startswith("Total:")):
+            item_section = False
+            continue
+        if not item_section:
+            continue
+
+        m = re.match(r"^(.+?)\s+(\d+(?:\.\d+)?)\s+\$([\d,]+\.\d+)\s+\$([\d,]+\.\d+)$", stripped)
+        if m:
+            if current_description_lines:
+                description = " ".join(current_description_lines).strip()
+                current_description_lines = []
+            else:
+                description = m.group(1).strip()
+            qty = parse_amount(m.group(2))
+            net_price = parse_amount(m.group(3))
+            gross_worth = parse_amount(m.group(4))
+            net_worth = round(gross_worth / 1.10, 2) if gross_worth else None
+            items.append({
+                "invoice_no": invoice_no,
+                "item_no": len(items) + 1,
+                "description": description,
+                "qty": qty,
+                "unit": "",
+                "net_price": net_price,
+                "net_worth": net_worth,
+                "vat_pct": "10%",
+                "gross_worth": gross_worth,
+            })
+        else:
+            current_description_lines.append(stripped)
+
+    if current_description_lines and items:
+        items[-1]["description"] = " ".join(current_description_lines).strip()
+
+    return items
 
 
 def validate_totals(line_items, summary):
@@ -242,12 +303,14 @@ def run(
     *,
     verbose: bool = True,
     progress_callback: Callable[[Path, bool, str | None], None] | None = None,
+    enable_llm_fallback: bool | None = None,
 ) -> dict:
     settings = get_settings()
     resolved_pdf_dir = Path(pdf_dir or settings.tables_input_dir)
     resolved_line_items_csv = Path(line_items_csv or settings.line_items_csv)
     resolved_summaries_csv = Path(summaries_csv or settings.summaries_csv)
     resolved_report_json = Path(report_json or settings.tables_report_json)
+    llm_fallback_enabled = settings.enable_llm_fallback if enable_llm_fallback is None else enable_llm_fallback
 
     invoice_files = sorted([
         f for f in resolved_pdf_dir.iterdir()
@@ -282,11 +345,20 @@ def run(
     for file_path in invoice_files:
         try:
             items, summary, used_fallback = extract_tables(file_path, verbose=verbose)
+            method = "rules"
             all_line_items.extend(items)
             if summary:
                 all_summaries.append(summary)
 
             validation = validate_totals(items, summary)
+            if llm_fallback_enabled and (not items or validation["status"] == "mismatch"):
+                page_text = _get_page_text(file_path)
+                llm_result = extract_full_invoice_llm(file_path, page_text)
+                items = llm_result.line_items or items
+                summary = llm_result.summary or summary
+                method = "llm"
+                validation = validate_totals(items, summary)
+
             if validation["status"] == "mismatch":
                 validation_mismatches.append({
                     "file": file_path.name,
@@ -297,7 +369,8 @@ def run(
 
             succeeded.append({
                 "file": file_path.name,
-                "used_fallback": used_fallback,
+                "method": method,
+                "used_fallback": used_fallback or method == "llm",
                 "validation_status": validation["status"],
             })
 
@@ -353,6 +426,8 @@ def run(
         "total_failed": len(failed),
         "total_validation_mismatches": len(validation_mismatches),
     }
+    resolved_report_json.parent.mkdir(parents=True, exist_ok=True)
+    resolved_report_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     if verbose:
         print("=" * 55)

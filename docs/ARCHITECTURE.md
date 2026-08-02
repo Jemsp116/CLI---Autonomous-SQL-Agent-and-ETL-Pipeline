@@ -2,105 +2,72 @@
 
 ## 1. Overview
 
-`invoice-agent` is a CLI-first tool that turns invoice PDFs into structured,
-queryable data. It has four layers:
+`invoice-agent` is a CLI-first invoice pipeline with four stages:
 
 ```
-┌─────────────┐   ┌──────────────┐   ┌────────────┐   ┌───────────────┐
-│  Generation  │ → │  Extraction  │ → │  Storage   │ → │  Agent (Q&A)  │
-│ (reportlab)  │   │ (pdfplumber, │   │ (SQLite /  │   │ (LangGraph    │
-│              │   │  camelot)    │   │  Postgres) │   │  ReAct agent) │
-└─────────────┘   └──────────────┘   └────────────┘   └───────────────┘
+Generation -> Extraction -> Storage -> Agent / Status
 ```
 
-Each layer is a standalone Python module with a `run(...)` function, so it
-can be called from the CLI, imported directly, or eventually wrapped by an
-API/web layer without rewriting logic.
+Each stage is implemented as an importable module with a `run(...)` function.
 
 ## 2. Components
 
-### 2.1 Generation (`invoice_agent/generate.py`)
-- Produces synthetic invoice PDFs via ReportLab for testing/demo purposes.
-- Not part of the production data path — real invoices come from user
-  uploads instead of this module once the tool is used for real data.
+### 2.1 Generation
 
-### 2.2 Extraction (`invoice_agent/extract/`)
-- `headers.py` — pdfplumber-based extraction of invoice metadata (invoice
-  number, date, seller/client info, tax IDs).
-- `tables.py` — Camelot-based extraction of line items and summary tables,
-  lattice mode with a stream-mode fallback.
-- Each file is processed independently; a failure on one file must not stop
-  the batch. Failures are logged and reported at the end of the run.
+`src/invoice_agent/generate.py` produces synthetic invoices for tests and demos.
 
-### 2.3 Storage (`invoice_agent/db/`)
-- `models.py` — schema definitions (`invoices`, `line_items`, with a foreign
-  key from `line_items.invoice_id → invoices.id`).
-- `loader.py` — loads extracted CSVs into the database, idempotently
-  (re-running does not create duplicate invoices).
-- `session.py` — connection/session management. SQLite for local/dev use,
-  Postgres-ready for multi-user/concurrent use.
+### 2.2 Extraction
 
-### 2.4 Agent (`invoice_agent/agent/`)
-- `react_agent.py` — LangGraph ReAct agent that translates natural-language
-  questions into SQL, executes them, and returns an answer.
-- `prompts.py` — system prompt, schema description, and few-shot examples
-  given to the agent.
-- The agent connects to the database using a **read-only role**. It must
-  never hold write/delete permissions.
+- `src/invoice_agent/extract/headers.py` extracts invoice metadata from the text layer.
+- `src/invoice_agent/extract/tables.py` extracts line items and summary totals.
+- `src/invoice_agent/extract/llm_fallback.py` provides the shared full-invoice LLM fallback used by both extraction stages.
 
-### 2.5 Terminal UI (`invoice_agent/ui/`)
-- Rich-based full-screen chat interface for `ask`.
-- Keeps rendering separate from agent and database logic.
-- Splits the interface into reusable header, conversation, input box, and
-  layout modules so the UI can evolve independently.
+Extraction is rules-first. The fallback only runs when the rules path fails or validation detects a mismatch, and the fallback result is still validated before it is accepted.
 
-### 2.6 CLI (`invoice_agent/cli.py`)
-- Thin layer. Commands parse arguments and call into the modules above.
-  No business logic lives in the CLI file itself.
+### 2.3 Storage
+
+- `src/invoice_agent/db/models.py` defines the invoice and line-item schema.
+- `src/invoice_agent/db/loader.py` loads extracted CSVs idempotently.
+- `src/invoice_agent/db/session.py` creates the database engine and sessions.
+
+### 2.4 Agent
+
+- `src/invoice_agent/agent/react_agent.py` handles SQL question answering.
+- `src/invoice_agent/agent/prompts.py` contains the SQL system prompt and the invoice extraction prompt.
+
+The database connection used by the agent is read-only.
+
+### 2.5 UI
+
+`src/invoice_agent/ui/` contains the Rich-based chat interface used by `ask`.
+
+### 2.6 CLI
+
+`src/invoice_agent/cli.py` stays thin. It parses arguments and forwards them to module-level `run(...)` functions.
 
 ## 3. Data Flow
 
-1. PDFs land in `data/invoices/` (generated or uploaded).
-2. `extract headers` and `extract tables` produce CSVs in `data/csv/`.
-3. `load` reads those CSVs and upserts rows into the database.
-4. `ask` opens a Rich full-screen chat. The backend queries the database,
-  streams the final answer, and keeps the conversation visible above a
-  fixed input box.
-5. `status` reads the filesystem + database to summarize pipeline state.
+1. Invoice PDFs are generated or supplied by the user.
+2. `extract headers` writes header CSV rows and a report JSON file.
+3. `extract tables` writes line-item and summary CSVs and a report JSON file.
+4. `load` imports the CSVs into SQLite.
+5. `ask` queries the database through the read-only agent.
+6. `status` summarizes the current pipeline state.
 
-## 4. Technology Choices
+## 4. Configuration
 
-| Concern            | Choice                  | Why |
-|---------------------|--------------------------|-----|
-| CLI framework       | `typer`                 | Type-hint driven, less boilerplate than argparse |
-| PDF generation      | `reportlab`              | Already in use, works well for synthetic data |
-| Header extraction   | `pdfplumber`             | Reliable for text-layer PDFs |
-| Table extraction    | `camelot-py[cv]`         | Best open-source option for ruled tables |
-| Database (dev)      | `SQLite`                 | Zero-setup, fine for single-user prototype |
-| Database (prod)     | `Postgres`               | Needed once there's concurrent access |
-| ORM/schema          | `SQLAlchemy`             | Portable between SQLite and Postgres |
-| Agent framework     | `LangGraph` + `LangChain`| Already in stack, good ReAct support |
-| Config              | `pydantic-settings`      | Typed `.env` loading, validation |
-| Output formatting   | `rich`                   | Progress bars, tables, readable CLI output |
+Settings are loaded from `src/invoice_agent/config.py` via `pydantic-settings`.
 
-## 5. Key Design Constraints
+Key options now include:
 
-- **No hardcoded paths.** All paths come from `config.py`, sourced from
-  `.env` or CLI flags.
-- **No silent failures.** Every extraction failure is logged with the
-  filename and reason; the batch continues.
-- **Agent is read-only.** SQL execution from the agent uses a database role
-  with `SELECT`-only privileges.
-- **Idempotent loads.** Loading the same CSV twice must not duplicate rows.
-- **Modules are importable.** Every module works when called directly in
-  Python, not only through the CLI — this keeps a future API/web layer cheap
-  to add.
+- `enable_llm_fallback`
+- `extraction_model`
+- `llm_fallback_max_retries`
 
-## 6. Future Extension Points
+## 5. Design Constraints
 
-- Swap `data/invoices/` (folder) for a file-upload endpoint without changing
-  extraction logic.
-- Wrap `agent.ask()` in a FastAPI endpoint for a web/API interface.
-- Add a job queue (Celery/RQ) in front of extraction for async processing.
-- Add multi-tenancy at the database layer (an `owner_id` column) if more
-  than one user will use the tool.
+- Keep the CLI thin.
+- Keep modules independently importable.
+- Keep batch processing resilient to per-file failures.
+- Validate extracted totals before trusting them.
+- Keep generated output and local databases out of version control.

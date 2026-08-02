@@ -23,7 +23,15 @@ def run_interactive(
     *,
     console: Console | None = None,
 ) -> None:
-    run_chat(initial_question=initial_question, db_path=db_path, console=console)
+    try:
+        run_chat(
+            initial_question=initial_question,
+            db_path=db_path,
+            console=console,
+        )
+    except KeyboardInterrupt:
+        resolved_console = console or Console()
+        resolved_console.print("\n[dim]Goodbye.[/dim]")
 
 
 def main() -> None:

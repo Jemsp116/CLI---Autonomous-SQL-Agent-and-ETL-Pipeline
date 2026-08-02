@@ -9,6 +9,7 @@ from pathlib import Path
 import pdfplumber
 
 from invoice_agent.config import get_settings
+from invoice_agent.extract.llm_fallback import extract_full_invoice_llm
 
 CLIENT_X_THRESHOLD = 240
 ITEMS_SECTION_LABEL = "ITEMS"
@@ -75,14 +76,41 @@ def extract_header(pdf_path):
                 result["date_of_issue"] = m.group(1)
             continue
 
+        if "#" in text and not result["invoice_no"]:
+            m = re.search(r"#\s*(\S+)", text)
+            if m:
+                result["invoice_no"] = m.group(1)
+            continue
+
+        if text.startswith("Date:"):
+            m = re.search(r"Date:\s*(.+)", text)
+            if m:
+                result["date_of_issue"] = m.group(1).strip()
+            continue
+
+        m = re.search(r"SuperStore\s+INVOICE", text, re.IGNORECASE)
+        if m and not result["seller_name"]:
+            result["seller_name"] = "SuperStore"
+            continue
+
         if "Seller:" in text and "Client:" in text:
             _parse_seller_client_block(rows, result)
+            return result
+
+        if "Bill To:" in text:
+            _parse_bill_ship_block(rows, result)
             return result
 
     if not result["invoice_no"]:
         _parse_alternative_header(rows, result)
 
     return result
+
+
+def _get_page_text(pdf_path: str | Path) -> str:
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        return page.extract_text() or ""
 
 
 def _parse_seller_client_block(rows, result):
@@ -127,6 +155,43 @@ def _parse_seller_client_block(rows, result):
         result["client_address"] = ", ".join(client_lines[1:])
 
 
+def _parse_bill_ship_block(rows, result):
+    in_block = False
+    client_lines = []
+    seller_lines = []
+    split_x = 240
+
+    for row in rows:
+        text = row_text(row)
+
+        if "Bill To:" in text or "Ship To:" in text:
+            in_block = True
+            for word in row:
+                if word["text"] == "Ship" and row[row.index(word) + 1]["text"] == "To:":
+                    split_x = word["x0"] - 10
+                    break
+            continue
+
+        if in_block:
+            if "Ship Mode:" in text or "Item" in text or "Balance" in text or "Subtotal" in text:
+                break
+
+            left_words = [w["text"] for w in row if w["x0"] < split_x]
+            right_words = [w["text"] for w in row if w["x0"] >= split_x]
+
+            if left_words:
+                client_lines.append(" ".join(left_words))
+            if right_words:
+                seller_lines.append(" ".join(right_words))
+
+    if client_lines:
+        result["client_name"] = client_lines[0]
+        result["client_address"] = ", ".join(client_lines[1:])
+    if seller_lines and not result["seller_name"]:
+        result["seller_name"] = seller_lines[0]
+        result["seller_address"] = ", ".join(seller_lines[1:])
+
+
 def _parse_alternative_header(rows, result):
     to_blocks = []
     current_block = []
@@ -156,7 +221,17 @@ def _parse_alternative_header(rows, result):
     for row in rows:
         text = row_text(row)
 
-        m = re.search(r"INVOICE\s*#\s*(\S+)", text, re.IGNORECASE)
+        m = re.search(r"INVOICE\s*[#:]\s*(\S+)", text, re.IGNORECASE)
+        if m:
+            result["invoice_no"] = m.group(1)
+            continue
+
+        m = re.search(r"Invoice no:\s*(\d+)", text, re.IGNORECASE)
+        if m:
+            result["invoice_no"] = m.group(1)
+            continue
+
+        m = re.search(r"#\s*(\d+)", text)
         if m:
             result["invoice_no"] = m.group(1)
             continue
@@ -164,6 +239,11 @@ def _parse_alternative_header(rows, result):
         m = re.search(r"DATE:\s*([\d./-]+)", text, re.IGNORECASE)
         if m:
             result["date_of_issue"] = m.group(1)
+            continue
+
+        m = re.search(r"Date:\s*(.+)", text, re.IGNORECASE)
+        if m:
+            result["date_of_issue"] = m.group(1).strip()
             continue
 
     if len(to_blocks) >= 1:
@@ -181,11 +261,13 @@ def run(
     *,
     verbose: bool = True,
     progress_callback: Callable[[Path, bool, str | None], None] | None = None,
+    enable_llm_fallback: bool | None = None,
 ) -> dict:
     settings = get_settings()
     resolved_pdf_dir = Path(pdf_dir or settings.headers_input_dir)
     resolved_output_csv = Path(output_csv or settings.headers_output_csv)
     resolved_report_json = Path(report_json or settings.headers_report_json)
+    llm_fallback_enabled = settings.enable_llm_fallback if enable_llm_fallback is None else enable_llm_fallback
 
     invoice_files = sorted([
         f for f in resolved_pdf_dir.iterdir()
@@ -220,10 +302,17 @@ def run(
     for file_path in invoice_files:
         try:
             data = extract_header(file_path)
+            method = "rules"
             if not data.get("invoice_no"):
-                raise ValueError("Invoice number not found in PDF")
+                if llm_fallback_enabled:
+                    page_text = _get_page_text(file_path)
+                    llm_result = extract_full_invoice_llm(file_path, page_text)
+                    data = {**data, **llm_result.header}
+                    method = "llm"
+                if not data.get("invoice_no"):
+                    raise ValueError("Invoice number not found in PDF")
             records.append(data)
-            succeeded.append(file_path.name)
+            succeeded.append({"file": file_path.name, "method": method})
             if verbose:
                 print(f"   {file_path.name}")
                 print(f"       Invoice No  : {data['invoice_no']}")
