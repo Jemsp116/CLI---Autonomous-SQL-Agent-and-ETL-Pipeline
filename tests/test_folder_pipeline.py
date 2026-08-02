@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from invoice_agent.cli import app, InvoiceAgentCLI
+from invoice_agent.extract.llm_fallback import LlmExtractionResult
 from invoice_agent.folder_pipeline import run as folder_pipeline_run
 from invoice_agent.preflight import ApiKeyResult
 
@@ -16,8 +17,44 @@ runner = CliRunner()
 
 
 def test_folder_pipeline_smoke(tmp_path):
+    fake_llm_result = LlmExtractionResult(
+        header={
+            "invoice_no": "MALFORMED-001",
+            "date_of_issue": "2024-01-01",
+            "seller_name": "Test Seller",
+            "seller_address": "123 Test St",
+            "seller_tax_id": "TIN-001",
+            "seller_gstin": "GSTIN-001",
+            "client_name": "Test Client",
+            "client_address": "456 Client Ave",
+            "client_tax_id": "TIN-002",
+        },
+        line_items=[
+            {
+                "invoice_no": "MALFORMED-001",
+                "item_no": "1",
+                "description": "Test Item",
+                "qty": 1,
+                "unit": "pcs",
+                "net_price": 100.0,
+                "net_worth": 100.0,
+                "vat_pct": "10%",
+                "gross_worth": 110.0,
+            }
+        ],
+        summary={
+            "invoice_no": "MALFORMED-001",
+            "vat_pct": "10%",
+            "total_net_worth": 100.0,
+            "total_vat": 10.0,
+            "total_gross_worth": 110.0,
+        },
+        used_llm=True,
+    )
     with patch("invoice_agent.folder_pipeline.ensure_openrouter_api_key", return_value=ApiKeyResult(key_found=True, persisted=True)), \
-         patch("invoice_agent.folder_pipeline.run_interactive"):
+         patch("invoice_agent.folder_pipeline.run_interactive"), \
+         patch("invoice_agent.extract.headers.extract_full_invoice_llm", return_value=fake_llm_result), \
+         patch("invoice_agent.extract.tables.extract_full_invoice_llm", return_value=fake_llm_result):
         out_dir = tmp_path / "output"
         result = folder_pipeline_run(
             pdf_folder=FIXTURES,
