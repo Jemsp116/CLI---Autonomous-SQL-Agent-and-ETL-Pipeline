@@ -58,9 +58,3 @@ invoice-agent status --csv data/csv/ --db data/db.sqlite
 - Extraction continues per file when one invoice fails.
 - The LLM fallback is off by default unless explicitly enabled.
 - Generated artifacts belong outside the repository and should not be committed.
-
-## Validation
-
-```bash
-pytest
-```
